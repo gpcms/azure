@@ -5,6 +5,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
 __metaclass__ = type
 
 
@@ -194,8 +195,6 @@ keyvaults:
 '''
 
 
-from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
-
 try:
     from azure.keyvault import KeyVaultClient, KeyVaultId, KeyVaultAuthentication, KeyId
     from azure.keyvault.models import KeyAttributes, JsonWebKey
@@ -316,17 +315,21 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
         return self.results
 
     def get_keyvault_client(self):
-        try:
-            self.log("Get KeyVaultClient from MSI")
-            credentials = MSIAuthentication(resource='https://vault.azure.net')
-            return KeyVaultClient(credentials)
-        except Exception:
-            self.log("Get KeyVaultClient from service principal")
+        if self.module.params['auth_source'] == 'msi':
+            # Don't use MSI credentials if the auth_source isn't set to MSI.  The below will Always result in credentials when running on an Azure VM.
+            try:
+                self.log("Get KeyVaultClient from MSI")
+                credentials = MSIAuthentication(
+                    resource=f"https://{self.azure_auth._cloud_environment.suffixes.keyvault_dns.split('.', 1).pop()}")
+                return KeyVaultClient(credentials)
+            except Exception:
+                self.log("Get KeyVaultClient from service principal")
 
         # Create KeyVault Client using KeyVault auth class and auth_callback
         def auth_callback(server, resource, scope):
             if self.credentials['client_id'] is None or self.credentials['secret'] is None:
-                self.fail('Please specify client_id, secret and tenant to access azure Key Vault.')
+                self.fail(
+                    'Please specify client_id, secret and tenant to access azure Key Vault.')
 
             tenant = self.credentials.get('tenant')
             if not self.credentials['tenant']:
@@ -368,7 +371,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
                 results.append(keybundle_to_dict(response))
 
         except KeyVaultErrorException as e:
-            self.log("Did not find the key vault key {0}: {1}".format(self.name, str(e)))
+            self.log("Did not find the key vault key {0}: {1}".format(
+                self.name, str(e)))
         return results
 
     def get_key_versions(self):
@@ -390,7 +394,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
                     if self.has_tags(item.tags, self.tags):
                         results.append(keyitem_to_dict(item))
         except KeyVaultErrorException as e:
-            self.log("Did not find key versions {0} : {1}.".format(self.name, str(e)))
+            self.log("Did not find key versions {0} : {1}.".format(
+                self.name, str(e)))
         return results
 
     def list_keys(self):
@@ -411,7 +416,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
                     if self.has_tags(item.tags, self.tags):
                         results.append(keyitem_to_dict(item))
         except KeyVaultErrorException as e:
-            self.log("Did not find key vault in current subscription {0}.".format(str(e)))
+            self.log(
+                "Did not find key vault in current subscription {0}.".format(str(e)))
         return results
 
     def get_deleted_key(self):
@@ -432,7 +438,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
                 results.append(deletedkeybundle_to_dict(response))
 
         except KeyVaultErrorException as e:
-            self.log("Did not find the key vault key {0}: {1}".format(self.name, str(e)))
+            self.log("Did not find the key vault key {0}: {1}".format(
+                self.name, str(e)))
         return results
 
     def list_deleted_keys(self):
@@ -445,7 +452,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
 
         results = []
         try:
-            response = self._client.get_deleted_keys(vault_base_url=self.vault_uri)
+            response = self._client.get_deleted_keys(
+                vault_base_url=self.vault_uri)
             self.log("Response : {0}".format(response))
 
             if response:
@@ -453,7 +461,8 @@ class AzureRMKeyVaultKeyInfo(AzureRMModuleBase):
                     if self.has_tags(item.tags, self.tags):
                         results.append(deletedkeyitem_to_dict(item))
         except KeyVaultErrorException as e:
-            self.log("Did not find key vault in current subscription {0}.".format(str(e)))
+            self.log(
+                "Did not find key vault in current subscription {0}.".format(str(e)))
         return results
 
 
