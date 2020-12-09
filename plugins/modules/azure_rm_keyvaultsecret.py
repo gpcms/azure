@@ -3,6 +3,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
 __metaclass__ = type
 
 
@@ -80,7 +81,6 @@ state:
           example: https://contoso.vault.azure.net/secrets/hello/e924f053839f4431b35bc54393f98423
 '''
 
-from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
 
 try:
     from azure.keyvault import KeyVaultClient, KeyVaultAuthentication, KeyVaultId
@@ -101,7 +101,8 @@ class AzureRMKeyVaultSecret(AzureRMModuleBase):
             secret_name=dict(type='str', required=True),
             secret_value=dict(type='str', no_log=True),
             keyvault_uri=dict(type='str', required=True),
-            state=dict(type='str', default='present', choices=['present', 'absent'])
+            state=dict(type='str', default='present',
+                       choices=['present', 'absent'])
         )
 
         required_if = [
@@ -157,7 +158,8 @@ class AzureRMKeyVaultSecret(AzureRMModuleBase):
         if not self.check_mode:
             # Create secret
             if self.state == 'present' and changed:
-                results['secret_id'] = self.create_update_secret(self.secret_name, self.secret_value, self.tags)
+                results['secret_id'] = self.create_update_secret(
+                    self.secret_name, self.secret_value, self.tags)
                 self.results['state'] = results
                 self.results['state']['status'] = 'Created'
             # Delete secret
@@ -174,17 +176,21 @@ class AzureRMKeyVaultSecret(AzureRMModuleBase):
         return self.results
 
     def get_keyvault_client(self):
-        try:
-            self.log("Get KeyVaultClient from MSI")
-            credentials = MSIAuthentication(resource='https://vault.azure.net')
-            return KeyVaultClient(credentials)
-        except Exception:
-            self.log("Get KeyVaultClient from service principal")
+        if self.module.params['auth_source'] == 'msi':
+            # Don't use MSI credentials if the auth_source isn't set to MSI.  The below will Always result in credentials when running on an Azure VM.
+            try:
+                self.log("Get KeyVaultClient from MSI")
+                credentials = MSIAuthentication(
+                    resource=f"https://{self.azure_auth._cloud_environment.suffixes.keyvault_dns.split('.', 1).pop()}")
+                return KeyVaultClient(credentials)
+            except Exception:
+                self.log("Get KeyVaultClient from service principal")
 
         # Create KeyVault Client using KeyVault auth class and auth_callback
         def auth_callback(server, resource, scope):
             if self.credentials['client_id'] is None or self.credentials['secret'] is None:
-                self.fail('Please specify client_id, secret and tenant to access azure Key Vault.')
+                self.fail(
+                    'Please specify client_id, secret and tenant to access azure Key Vault.')
 
             tenant = self.credentials.get('tenant')
             if not self.credentials['tenant']:
@@ -204,7 +210,8 @@ class AzureRMKeyVaultSecret(AzureRMModuleBase):
 
     def get_secret(self, name, version=''):
         ''' Gets an existing secret '''
-        secret_bundle = self.client.get_secret(self.keyvault_uri, name, version)
+        secret_bundle = self.client.get_secret(
+            self.keyvault_uri, name, version)
         if secret_bundle:
             secret_id = KeyVaultId.parse_secret_id(secret_bundle.id)
             return dict(secret_id=secret_id.id, secret_value=secret_bundle.value)
@@ -212,7 +219,8 @@ class AzureRMKeyVaultSecret(AzureRMModuleBase):
 
     def create_update_secret(self, name, secret, tags):
         ''' Creates/Updates a secret '''
-        secret_bundle = self.client.set_secret(self.keyvault_uri, name, secret, tags)
+        secret_bundle = self.client.set_secret(
+            self.keyvault_uri, name, secret, tags)
         secret_id = KeyVaultId.parse_secret_id(secret_bundle.id)
         return secret_id.id
 

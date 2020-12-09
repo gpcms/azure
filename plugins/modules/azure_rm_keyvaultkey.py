@@ -3,6 +3,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
 __metaclass__ = type
 
 
@@ -82,7 +83,6 @@ state:
           example: https://contoso.vault.azure.net/keys/hello/e924f053839f4431b35bc54393f98423
 '''
 
-from ansible_collections.azure.azcollection.plugins.module_utils.azure_rm_common import AzureRMModuleBase
 
 try:
     import re
@@ -109,7 +109,8 @@ class AzureRMKeyVaultKey(AzureRMModuleBase):
             pem_file=dict(type='str'),
             pem_password=dict(type='str'),
             byok_file=dict(type='str'),
-            state=dict(type='str', default='present', choices=['present', 'absent'])
+            state=dict(type='str', default='present',
+                       choices=['present', 'absent'])
         )
 
         self.results = dict(
@@ -181,17 +182,21 @@ class AzureRMKeyVaultKey(AzureRMModuleBase):
         return self.results
 
     def get_keyvault_client(self):
-        try:
-            self.log("Get KeyVaultClient from MSI")
-            credentials = MSIAuthentication(resource='https://vault.azure.net')
-            return KeyVaultClient(credentials)
-        except Exception:
-            self.log("Get KeyVaultClient from service principal")
+        if self.module.params['auth_source'] == 'msi':
+            # Don't use MSI credentials if the auth_source isn't set to MSI.  The below will Always result in credentials when running on an Azure VM.
+            try:
+                self.log("Get KeyVaultClient from MSI")
+                credentials = MSIAuthentication(
+                    resource=f"https://{self.azure_auth._cloud_environment.suffixes.keyvault_dns.split('.', 1).pop()}")
+                return KeyVaultClient(credentials)
+            except Exception:
+                self.log("Get KeyVaultClient from service principal")
 
         # Create KeyVault Client using KeyVault auth class and auth_callback
         def auth_callback(server, resource, scope):
             if self.credentials['client_id'] is None or self.credentials['secret'] is None:
-                self.fail('Please specify client_id, secret and tenant to access azure Key Vault.')
+                self.fail(
+                    'Please specify client_id, secret and tenant to access azure Key Vault.')
 
             tenant = self.credentials.get('tenant')
             if not self.credentials['tenant']:
@@ -218,7 +223,8 @@ class AzureRMKeyVaultKey(AzureRMModuleBase):
 
     def create_key(self, name, tags, kty='RSA'):
         ''' Creates a key '''
-        key_bundle = self.client.create_key(vault_base_url=self.keyvault_uri, key_name=name, kty=kty, tags=tags)
+        key_bundle = self.client.create_key(
+            vault_base_url=self.keyvault_uri, key_name=name, kty=kty, tags=tags)
         key_id = KeyVaultId.parse_key_id(key_bundle.key.kid)
         return key_id.id
 
@@ -257,16 +263,19 @@ class AzureRMKeyVaultKey(AzureRMModuleBase):
             #      00:a0:91:4d:00:23:4a:c6:83:b2:1b:4c:15:d5:be:
             #      d8:87:bd:c9:59:c2:e5:7a:f5:4a:e7:34:e8:f0:07:
             # The desired match should always be the first component of the match
-            regex = re.compile(r'([^:\s]*(:[^\:)]+\))|([^:\s]*(:\s*[0-9A-Fa-f]{2})+))')
+            regex = re.compile(
+                r'([^:\s]*(:[^\:)]+\))|([^:\s]*(:\s*[0-9A-Fa-f]{2})+))')
             # regex2: extracts the hex string from a format like: 65537 (0x10001)
             regex2 = re.compile(r'(?<=\(0x{1})([0-9A-Fa-f]*)(?=\))')
 
-            key_params = crypto.dump_privatekey(crypto.FILETYPE_TEXT, src).decode('utf-8')
+            key_params = crypto.dump_privatekey(
+                crypto.FILETYPE_TEXT, src).decode('utf-8')
             for match in regex.findall(key_params):
                 comps = match[0].split(':', 1)
                 name = conversion_dict.get(comps[0], None)
                 if name:
-                    value = comps[1].replace(' ', '').replace('\n', '').replace(':', '')
+                    value = comps[1].replace(' ', '').replace(
+                        '\n', '').replace(':', '')
                     try:
                         value = _to_bytes(value)
                     except Exception:  # pylint:disable=broad-except
@@ -283,10 +292,12 @@ class AzureRMKeyVaultKey(AzureRMModuleBase):
                 pem_data = f.read()
             # load private key and prompt for password if encrypted
             try:
-                pem_password = str(pem_password).encode() if pem_password else None
+                pem_password = str(
+                    pem_password).encode() if pem_password else None
                 # despite documentation saying password should be a string, it needs to actually
                 # be UTF-8 encoded bytes
-                pkey = crypto.load_privatekey(crypto.FILETYPE_PEM, pem_data, pem_password)
+                pkey = crypto.load_privatekey(
+                    crypto.FILETYPE_PEM, pem_data, pem_password)
             except crypto.Error:
                 pass  # wrong password
             except TypeError:
